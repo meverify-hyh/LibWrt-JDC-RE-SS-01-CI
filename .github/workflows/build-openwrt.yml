@@ -63,7 +63,7 @@ jobs:
     # =============================================
     # 配置 VLAN 233 作为默认网络
     # 所有物理端口默认属于 VLAN 233
-    # 管理 IP: 192.168.2.253
+    # 管理 IP: 192.168.2.253（移除 192.168.1.1）
     # =============================================
     - name: Configure VLAN 233 as default network
       working-directory: ${{ env.FILE_PATH }}
@@ -103,12 +103,7 @@ jobs:
         EOF
         echo "✅ VLAN 233 configured as default, management IP: 192.168.2.253"
 
-    - name: Update & Install Feeds
-      working-directory: ${{ env.FILE_PATH }}
-      run: |
-        ./scripts/feeds update -a
-        ./scripts/feeds install -a
-
+    # ===== 先复制 .config（在 feeds 更新之前） =====
     - name: Check Configuration
       id: check_config
       working-directory: ${{ env.FILE_PATH }}
@@ -122,29 +117,40 @@ jobs:
           echo "config_exists=false" >> $GITHUB_ENV
         fi
 
-    - name: SSH Connection (Tmate)
-      uses: mxschmitt/action-tmate@v3
-      if: github.event.inputs.ssh == 'true'
-      with:
-        limit-access-to-actor: true
-        detached: false
-
-    - name: Validate Config & Generate Vars
+    - name: Update & Install Feeds
       working-directory: ${{ env.FILE_PATH }}
       run: |
-        if [ ! -f .config ]; then
-          echo "Error: No .config file found! Please provide a .config or use SSH to generate one."
-          exit 1
-        fi
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a
+
+    # ===== 强制锁定设备 + 验证 =====
+    - name: Validate & Lock Device
+      working-directory: ${{ env.FILE_PATH }}
+      run: |
+        # 禁用多设备编译
+        sed -i 's/CONFIG_TARGET_MULTI_PROFILE=y/# CONFIG_TARGET_MULTI_PROFILE is not set/g' .config
+        echo '# CONFIG_TARGET_MULTI_PROFILE is not set' >> .config
         
+        # 删除所有其他设备配置
+        sed -i '/CONFIG_TARGET_DEVICE_qualcommax_ipq60xx_DEVICE_/d' .config
+        sed -i '/CONFIG_TARGET_DEVICE_qualcommax_ipq807x_DEVICE_/d' .config
+        
+        # 只保留目标设备
+        echo 'CONFIG_TARGET_DEVICE_qualcommax_ipq60xx_DEVICE_jdcloud_re-ss-01=y' >> .config
+        
+        # 运行 defconfig 补全依赖
         make defconfig
         
+        # 提取设备信息
         DEVICE_TARGET=$(cat .config | grep CONFIG_TARGET_BOARD | awk -F '"' '{print $2}')
-        echo "DEVICE_TARGET=$DEVICE_TARGET" >> $GITHUB_ENV
         DEVICE_SUBTARGET=$(cat .config | grep CONFIG_TARGET_SUBTARGET | awk -F '"' '{print $2}')
+        echo "DEVICE_TARGET=$DEVICE_TARGET" >> $GITHUB_ENV
         echo "DEVICE_SUBTARGET=$DEVICE_SUBTARGET" >> $GITHUB_ENV
         
-        echo "Target: $DEVICE_TARGET, Subtarget: $DEVICE_SUBTARGET"
+        # 打印选中的设备（用于调试）
+        echo "=== Selected Device ==="
+        grep CONFIG_TARGET_DEVICE_ .config | grep =y
+        echo "======================="
 
     - name: Cache Toolchain
       if: env.CACHE_TOOLCHAIN == 'true'
@@ -222,6 +228,7 @@ jobs:
           - 💝 源码分支: ${{ env.REPO_BRANCH }}
           - 🌐 管理地址: **192.168.2.253** (VLAN 233)
           - 🔑 默认密码: 无 (首次登录请立即设置)
+          - 📦 包含插件: Argon主题, DiskMan, FileManager, ZeroTier, SoftEtherVPN
           ### 🧊 版本详情 (From Manifest)
           - **Kernel**: ${{ env.KERNEL_VER }}
           - **LuCI**: ${{ env.LUCI_VER }}
