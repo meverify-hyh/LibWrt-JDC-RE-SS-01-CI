@@ -171,6 +171,18 @@ jobs:
         # 运行 defconfig 补全依赖
         make defconfig
 
+        # ===== 依赖诊断：打印目标符号的 kconfig depends on 及其实时取值 =====
+        echo "=== 依赖诊断 ==="
+        for sym in PACKAGE_luci-theme-argon PACKAGE_wget-ssl PACKAGE_ucode-mod-lua PACKAGE_luci-compat PACKAGE_luci-lua-runtime PACKAGE_luci-app-diskman; do
+          echo "--- $sym ---"
+          block=$(awk -v s="config $sym" '$0==s{f=1} f{print} f&&/^$/{exit}' tmp/.config-package.in)
+          echo "$block" | grep -E 'bool|depends on|select' | head -12 | sed 's/^/    /'
+          echo "$block" | grep -oE 'PACKAGE_[A-Za-z0-9_.-]+' | sort -u | while read -r dep; do
+            val=$(grep -m1 -E "^(# )?CONFIG_${dep}[= ]" .config || true)
+            echo "      $dep => ${val:-<.config 中缺失>}"
+          done
+        done
+        echo "=== 诊断结束 ==="
         # 提取设备信息
         DEVICE_TARGET=$(grep -m1 '^CONFIG_TARGET_BOARD=' .config | awk -F '"' '{print $2}') || true
         DEVICE_SUBTARGET=$(grep -m1 '^CONFIG_TARGET_SUBTARGET=' .config | awk -F '"' '{print $2}') || true
