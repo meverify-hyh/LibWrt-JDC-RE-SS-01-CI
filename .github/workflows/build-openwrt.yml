@@ -207,11 +207,19 @@ jobs:
       id: compile
       working-directory: ${{ env.FILE_PATH }}
       run: |
+        set -o pipefail
         echo "Starting build..."
-        make -j$(nproc) || make -j1 V=s
+        make -j$(nproc) 2>&1 | tee build.log || make -j1 V=s 2>&1 | tee -a build.log
         echo "status=success" >> $GITHUB_OUTPUT
         echo "DATE=$(date +"%Y-%m-%d %H:%M:%S")" >> $GITHUB_ENV
         echo "FILE_DATE=$(date +"%Y.%m.%d")" >> $GITHUB_ENV
+
+    - name: Show build log tail on failure
+      if: failure()
+      working-directory: ${{ env.FILE_PATH }}
+      run: |
+        echo "===== last 200 lines of build.log ====="
+        tail -n 200 build.log || echo "build.log missing"
 
     - name: Organize Files & Parse Manifest
       id: organize
