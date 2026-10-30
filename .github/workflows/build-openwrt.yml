@@ -84,8 +84,7 @@ jobs:
             list ports 'lan1'
             list ports 'lan2'
             list ports 'lan3'
-            list ports 'lan4'
-            list ports 'eth0'
+            list ports 'wan'
 
         config interface 'lan'
             option device 'br-lan'
