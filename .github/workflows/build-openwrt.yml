@@ -15,7 +15,7 @@ permissions:
 
 env:
   REPO_URL: https://github.com/LiBwrt-op/openwrt-6.x.git
-  REPO_BRANCH: main-nss
+  REPO_BRANCH: 25.12-nss
   TZ: Asia/Shanghai
   CACHE_TOOLCHAIN: true
   FIRMWARE_RELEASE: true
@@ -61,11 +61,13 @@ jobs:
         fi
 
     # =============================================
-    # 配置 VLAN 233 作为默认网络
-    # 所有物理端口默认属于 VLAN 233
-    # 管理 IP: 192.168.2.253（移除 192.168.1.1）
+    # 纯 AP（Dumb AP）模式
+    # - 取消 VLAN 233：所有网口桥接到同一个 br-lan
+    # - 管理 IP: 192.168.2.253
+    # - 关闭 DHCP / odhcpd / 防火墙，地址由上游路由器分配
+    # - 预置无线：2.4G = NETGEAR，5G = PDCN
     # =============================================
-    - name: Configure VLAN 233 as default network
+    - name: Configure AP mode
       working-directory: ${{ env.FILE_PATH }}
       run: |
         mkdir -p package/base-files/files/etc/config
@@ -79,29 +81,59 @@ jobs:
         config device
             option name 'br-lan'
             option type 'bridge'
-            option vlan_filtering '1'
             list ports 'lan1'
             list ports 'lan2'
             list ports 'lan3'
             list ports 'lan4'
             list ports 'eth0'
 
-        config bridge-vlan
-            option device 'br-lan'
-            option vlan '233'
-            list ports 'lan1:u*'
-            list ports 'lan2:u*'
-            list ports 'lan3:u*'
-            list ports 'lan4:u*'
-            list ports 'eth0:t'
-
         config interface 'lan'
-            option device 'br-lan.233'
+            option device 'br-lan'
             option proto 'static'
             option ipaddr '192.168.2.253'
             option netmask '255.255.255.0'
         EOF
-        echo "✅ VLAN 233 configured as default, management IP: 192.168.2.253"
+
+        mkdir -p package/base-files/files/etc/uci-defaults
+        cat > package/base-files/files/etc/uci-defaults/99-ap-mode << 'EOF'
+        #!/bin/sh
+        # 纯 AP 模式：关闭 DHCP / RA / 防火墙，预置无线
+
+        uci set dhcp.lan.ignore='1'
+        uci -q delete dhcp.lan.dhcpv6
+        uci -q delete dhcp.lan.ra
+        uci commit dhcp 2>/dev/null
+
+        /etc/init.d/odhcpd disable 2>/dev/null
+        /etc/init.d/dnsmasq disable 2>/dev/null
+        /etc/init.d/firewall disable 2>/dev/null
+
+        [ -s /etc/config/wireless ] || wifi config 2>/dev/null
+        if [ -s /etc/config/wireless ]; then
+          for dev in $(uci show wireless 2>/dev/null | sed -n "s/^wireless\.\(radio[0-9]*\)=wifi-device$/\1/p"); do
+            band=$(uci -q get wireless.$dev.band)
+            case "$band" in
+              2g) ssid='NETGEAR' ;;
+              5g) ssid='PDCN' ;;
+              *) continue ;;
+            esac
+            uci set wireless.$dev.disabled='0'
+            for sec in $(uci show wireless 2>/dev/null | sed -n "s/^wireless\.\([^.]*\)=wifi-iface$/\1/p"); do
+              [ "$(uci -q get wireless.$sec.device)" = "$dev" ] || continue
+              uci set wireless.$sec.ssid="$ssid"
+              uci set wireless.$sec.encryption='psk2'
+              uci set wireless.$sec.key='999...zzz'
+              uci set wireless.$sec.network='lan'
+              uci set wireless.$sec.disabled='0'
+            done
+          done
+          uci commit wireless
+        fi
+
+        exit 0
+        EOF
+        chmod +x package/base-files/files/etc/uci-defaults/99-ap-mode
+        echo "AP mode: single bridge br-lan / 192.168.2.253 / DHCP+firewall off / WiFi NETGEAR+PDCN"
 
     # ===== 先复制 .config（在 feeds 更新之前） =====
     - name: Check Configuration
@@ -226,7 +258,8 @@ jobs:
           - 平台架构: ${{ env.DEVICE_TARGET }} - ${{ env.DEVICE_SUBTARGET }}
           - ⚽ 固件源码: ${{ env.REPO_URL }}
           - 💝 源码分支: ${{ env.REPO_BRANCH }}
-          - 🌐 管理地址: **192.168.2.253** (VLAN 233)
+          - 🌐 管理地址: **192.168.2.253**（纯 AP，DHCP/防火墙已关闭）
+          - 📶 无线: 2.4G `NETGEAR` / 5G `PDCN`（WPA2）
           - 🔑 默认密码: 无 (首次登录请立即设置)
           - 📦 包含插件: Argon主题, DiskMan, FileManager, ZeroTier, SoftEtherVPN
           ### 🧊 版本详情 (From Manifest)
