@@ -92,21 +92,24 @@ jobs:
             option proto 'static'
             option ipaddr '192.168.2.253'
             option netmask '255.255.255.0'
+            option gateway '192.168.2.1'
+            option dns '192.168.2.1'
         EOF
 
         mkdir -p package/base-files/files/etc/uci-defaults
         cat > package/base-files/files/etc/uci-defaults/99-ap-mode << 'EOF'
         #!/bin/sh
         # 纯 AP 模式：关闭 DHCP / RA / 防火墙，预置无线
+        exec >>/tmp/ap-mode.log 2>&1
+        echo "=== ap-mode $(date) ==="
 
         uci set dhcp.lan.ignore='1'
         uci -q delete dhcp.lan.dhcpv6
         uci -q delete dhcp.lan.ra
-        uci commit dhcp 2>/dev/null
+        uci commit dhcp
 
-        /etc/init.d/odhcpd disable 2>/dev/null
-        /etc/init.d/dnsmasq disable 2>/dev/null
-        /etc/init.d/firewall disable 2>/dev/null
+        /etc/init.d/odhcpd disable
+        /etc/init.d/firewall disable
 
         [ -s /etc/config/wireless ] || wifi config 2>/dev/null
         if [ -s /etc/config/wireless ]; then
