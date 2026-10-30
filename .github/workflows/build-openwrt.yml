@@ -161,30 +161,32 @@ jobs:
     - name: Validate & Lock Device
       working-directory: ${{ env.FILE_PATH }}
       run: |
-        # 禁用多设备编译
-        sed -i 's/CONFIG_TARGET_MULTI_PROFILE=y/# CONFIG_TARGET_MULTI_PROFILE is not set/g' .config
-        echo '# CONFIG_TARGET_MULTI_PROFILE is not set' >> .config
-        
-        # 删除所有其他设备配置
+        # 只保留目标设备
+        # 注意：25.12 不能关掉 CONFIG_TARGET_MULTI_PROFILE，否则 defconfig 会把
+        # CONFIG_TARGET_DEVICE_* 全部丢弃（之前就是这样导致本步骤失败）
         sed -i '/CONFIG_TARGET_DEVICE_qualcommax_ipq60xx_DEVICE_/d' .config
         sed -i '/CONFIG_TARGET_DEVICE_qualcommax_ipq807x_DEVICE_/d' .config
-        
-        # 只保留目标设备
         echo 'CONFIG_TARGET_DEVICE_qualcommax_ipq60xx_DEVICE_jdcloud_re-ss-01=y' >> .config
-        
+
         # 运行 defconfig 补全依赖
         make defconfig
-        
+
         # 提取设备信息
-        DEVICE_TARGET=$(cat .config | grep CONFIG_TARGET_BOARD | awk -F '"' '{print $2}')
-        DEVICE_SUBTARGET=$(cat .config | grep CONFIG_TARGET_SUBTARGET | awk -F '"' '{print $2}')
+        DEVICE_TARGET=$(grep -m1 '^CONFIG_TARGET_BOARD=' .config | awk -F '"' '{print $2}') || true
+        DEVICE_SUBTARGET=$(grep -m1 '^CONFIG_TARGET_SUBTARGET=' .config | awk -F '"' '{print $2}') || true
         echo "DEVICE_TARGET=$DEVICE_TARGET" >> $GITHUB_ENV
         echo "DEVICE_SUBTARGET=$DEVICE_SUBTARGET" >> $GITHUB_ENV
-        
-        # 打印选中的设备（用于调试）
+
+        # 打印选中的设备（用于调试，允许为空不报错）
         echo "=== Selected Device ==="
-        grep CONFIG_TARGET_DEVICE_ .config | grep =y
+        grep -E '^CONFIG_TARGET_(DEVICE_|MULTI_PROFILE|PER_DEVICE_ROOTFS)' .config | grep '=y' || true
         echo "======================="
+
+        # 硬校验：目标设备必须存在
+        if ! grep -q '^CONFIG_TARGET_DEVICE_qualcommax_ipq60xx_DEVICE_jdcloud_re-ss-01=y' .config; then
+          echo "ERROR: 目标设备 jdcloud_re-ss-01 未出现在 .config 中"
+          exit 1
+        fi
 
     - name: Cache Toolchain
       if: env.CACHE_TOOLCHAIN == 'true'
